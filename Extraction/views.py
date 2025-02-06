@@ -170,4 +170,97 @@ def upload_files(request):
     except Exception as e:
         print("Error Ocuured",e)
         return None
+def extract_bill_details():
+    result1 = docTr_model([np.array(img)])
+    print("Bill details extraction called....!")
+    l=[]
+    for page in result1.pages:
+        for block in page.blocks:
+            for line in block.lines:
+                line_text = " ".join([word.value for word in line.words])
+                print(line_text)
+                student_name = re.search(r'Student\s*(.*)', line_text)
+                if student_name:
+                    l.append(["Name",student_name.group(1)])
+                parent_name = re.search(r'Parent\s*(.*)', line_text)
+                if parent_name:
+                    l.append(["Parent Name",parent_name.group(1)])
+                course_info = re.search(r'Course\s*-\s*Exam\s*(.*)', line_text)
+                if course_info:
+                    l.append(["Course-Exam",course_info.group(1)])
+                branch_info = re.search(r'Branch\s*(.*)', line_text)
+                if branch_info:
+                    l.append(["Branch ",branch_info.group(1)])
+                pattern = r'\b\d{5}[A-Z]\d{4}\b'
+                pin = re.findall(pattern, line_text)
+                if pin:
+                    l.append(["Pin",pin[0]])
+    return l
 
+def extract_bills(file):
+    try:
+        if file.content_type.startswith('image/'):
+
+            image_stream = file.read()
+            image_data = np.frombuffer(image_stream, np.uint8)
+        
+            # Decode the image using OpenCV
+            image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+            image=denoise_image(image)
+            table_data=extract_table(image)
+            details=extract_bill_details(image)
+            details.extend(table_data)
+            data_dict = {col[0]: col[1:] for col in details}
+            json_data = [data_dict]
+            #json_output = json.dumps(json_data, indent=4)
+            #print("Json conversion completed")
+            return json_data
+                                        
+        elif file.content_type == 'application/pdf':
+            temp_path = os.path.join(settings.MEDIA_ROOT, file.name)
+            with open(temp_path, 'wb') as temp_file:
+                for chunk in file.chunks():
+                    temp_file.write(chunk)
+            processed_files=[]
+            images = convert_from_path(temp_path, dpi=300)
+            for img in images:
+                img=denoise_image(img)
+                extracted=extract_table(img)
+                details=extract_details(img)
+                details.extend(extracted)
+                data_dict = {col[0]: col[1:] for col in details}
+                processed_files.append(data_dict)
+            os.remove(temp_path)
+            #json_output = json.dumps(processed_files, indent=4)
+            #return json_output
+            return processed_files
+
+        elif file.content_type == 'text/plain':
+            file_content = file.read().decode('utf-8')
+            return file_content
+        
+        else:
+            return f"Unsupported file type: {file.content_type}"
+
+    except Exception as e:
+        print(f"An error occurred while processing the file {file.name}: {e}")
+        return None
+
+def upload_Bills(request):
+    try:
+        if request.method == 'POST':
+            uploaded_files = request.FILES.getlist('files')
+            processed_files = []
+            data=[]
+            for uploaded_file in uploaded_files:
+                
+                extracted=extract_bills(uploaded_file)
+                processed_files.extend( extracted)
+                print("Processing completed...")
+            #print("Processed Files:",processed_files)
+            return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+            
+        return render(request, 'testing.html')
+    except Exception as e:
+        print("Error Ocuured",e)
+        return None
