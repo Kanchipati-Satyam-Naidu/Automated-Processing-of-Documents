@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Success</title>
+</head>
+<body>
+    <h2>Extracted data:</h2>
+    <pre id="json-output"></pre>
+    <div>
+        
+        <!-- <p></p> -->
+    </div>
+    <ul>
+        {% for file_path in files %}
+        <li><a href="{{ file_path }}">{{ file_path }}</a></li>
+        {% endfor %}
+    </ul>
+
+    <script>
+        var jsonData = {{ data|safe }};  // Directly pass JSON data
+        document.getElementById("json-output").textContent = JSON.stringify(jsonData, null, 4);
+    </script>
+</body>
+</html>
