@@ -20,6 +20,13 @@ table_detect= YOLO(table_model_path )
 column_detect = YOLO(column_model_path)
 docTr_model = ocr_predictor(pretrained=True)
 
+def denoise_image(image):
+    # Convert to 8-bit if image is in [0,1] range
+    image = (image * 255).astype(np.uint8) if image.max() <= 1 else image
+    # Apply denoising
+    denoised_image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+    return denoised_image
+
 def extract_details(img):
     result1 = docTr_model([np.array(img)])
     print("Details extraction called....!")
@@ -28,16 +35,17 @@ def extract_details(img):
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
-                student_name = re.search(r'Student:\s*(.*)', line_text)
+                print(line_text)
+                student_name = re.search(r'Student\s*(.*)', line_text)
                 if student_name:
                     l.append(["Name",student_name.group(1)])
-                parent_name = re.search(r'Parent:\s*(.*)', line_text)
+                parent_name = re.search(r'Parent\s*(.*)', line_text)
                 if parent_name:
                     l.append(["Parent Name",parent_name.group(1)])
                 course_info = re.search(r'Course\s*-\s*Exam\s*(.*)', line_text)
                 if course_info:
                     l.append(["Course-Exam",course_info.group(1)])
-                branch_info = re.search(r'Branch:\s*(.*)', line_text)
+                branch_info = re.search(r'Branch\s*(.*)', line_text)
                 if branch_info:
                     l.append(["Branch ",branch_info.group(1)])
                 pattern = r'\b\d{5}[A-Z]\d{4}\b'
@@ -100,6 +108,7 @@ def extract(file):
         
             # Decode the image using OpenCV
             image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+            image=denoise_image(image)
             table_data=extract_table(image)
             print("Table Detection Completed...!")
             details=extract_details(image)
@@ -119,6 +128,7 @@ def extract(file):
             processed_files=[]
             images = convert_from_path(temp_path, dpi=300)
             for img in images:
+                img=denoise_image(img)
                 extracted=extract_table(img)
                 details=extract_details(img)
                 details.extend(extracted)
@@ -153,7 +163,7 @@ def upload_files(request):
                 #print(extracted)
                 processed_files.extend( extracted)
                 print("Processing completed...")
-            print("Processed Files:",processed_files)
+            #print("Processed Files:",processed_files)
             return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
             
         return render(request, 'testing.html')
