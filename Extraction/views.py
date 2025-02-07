@@ -9,6 +9,8 @@ import re
 import os
 import cv2
 import locale
+from django.conf import settings
+from pdf2image import convert_from_path
 
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 # Create your views here.
@@ -122,12 +124,16 @@ def extract(file):
                                         
         elif file.content_type == 'application/pdf':
             temp_path = os.path.join(settings.MEDIA_ROOT, file.name)
+            print("Temp path creation started")
             with open(temp_path, 'wb') as temp_file:
                 for chunk in file.chunks():
                     temp_file.write(chunk)
             processed_files=[]
+            print("Temp path created")
             images = convert_from_path(temp_path, dpi=300)
             for img in images:
+                img = np.array(img)
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img=denoise_image(img)
                 extracted=extract_table(img)
                 details=extract_details(img)
@@ -179,28 +185,30 @@ def extract_bill_details():
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
                 print(line_text)
-                student_name = re.search(r'Student\s*(.*)', line_text)
+                student_name = re.search(r'Name\s*(.*)', line_text)
                 if student_name:
                     l.append(["Name",student_name.group(1)])
-                parent_name = re.search(r'Parent\s*(.*)', line_text)
+                parent_name = re.search(r'Receipt\sNo\s*(.*)', line_text)
                 if parent_name:
-                    l.append(["Parent Name",parent_name.group(1)])
-                course_info = re.search(r'Course\s*-\s*Exam\s*(.*)', line_text)
+                    l.append(["Receipt No",parent_name.group(1)])
+                course_info = re.search(r'Date\s*(.*)', line_text)
                 if course_info:
-                    l.append(["Course-Exam",course_info.group(1)])
+                    l.append(["Date",course_info.group(1)])
                 branch_info = re.search(r'Branch\s*(.*)', line_text)
                 if branch_info:
                     l.append(["Branch ",branch_info.group(1)])
-                pattern = r'\b\d{5}[A-Z]\d{4}\b'
-                pin = re.findall(pattern, line_text)
+                # pattern = r'\b\d{5}[A-Z]\d{4}\b'
+                pin = re.search(r'PIN\s*(.*)', line_text)
                 if pin:
-                    l.append(["Pin",pin[0]])
+                    l.append(["Pin",pin.group(1)])
+                year = re.search(r'Year\s*(.*)', line_text)
+                if year:
+                    l.append(["Year",year.group(1)])
     return l
 
 def extract_bills(file):
     try:
         if file.content_type.startswith('image/'):
-
             image_stream = file.read()
             image_data = np.frombuffer(image_stream, np.uint8)
         
@@ -224,6 +232,8 @@ def extract_bills(file):
             processed_files=[]
             images = convert_from_path(temp_path, dpi=300)
             for img in images:
+                img = np.array(img)
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img=denoise_image(img)
                 extracted=extract_table(img)
                 details=extract_details(img)
