@@ -31,7 +31,7 @@ def denoise_image(image):
 
 def extract_details(img):
     result1 = docTr_model([np.array(img)])
-    print("Details extraction called....!")
+    #print("Details extraction called....!")
     l=[]
     for page in result1.pages:
         for block in page.blocks:
@@ -176,35 +176,33 @@ def upload_files(request):
     except Exception as e:
         print("Error Ocuured",e)
         return None
-def extract_bill_details():
+
+def extract_bill_details(img):
     result1 = docTr_model([np.array(img)])
     print("Bill details extraction called....!")
-    l=[]
+    res=[]
+    prev_line=""
     for page in result1.pages:
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
                 print(line_text)
-                student_name = re.search(r'Name\s*(.*)', line_text)
-                if student_name:
-                    l.append(["Name",student_name.group(1)])
-                parent_name = re.search(r'Receipt\sNo\s*(.*)', line_text)
-                if parent_name:
-                    l.append(["Receipt No",parent_name.group(1)])
-                course_info = re.search(r'Date\s*(.*)', line_text)
-                if course_info:
-                    l.append(["Date",course_info.group(1)])
-                branch_info = re.search(r'Branch\s*(.*)', line_text)
-                if branch_info:
-                    l.append(["Branch ",branch_info.group(1)])
-                # pattern = r'\b\d{5}[A-Z]\d{4}\b'
-                pin = re.search(r'PIN\s*(.*)', line_text)
-                if pin:
-                    l.append(["Pin",pin.group(1)])
-                year = re.search(r'Year\s*(.*)', line_text)
-                if year:
-                    l.append(["Year",year.group(1)])
-    return l
+                if "Receipt No" in prev_line:
+                    res.append(["Receipt No", line_text])
+                if "Date" in prev_line:
+                    res.append(["Date", line_text])
+                if "Name" in prev_line:
+                    res.append(["Name", line_text])
+                if "Branch" in prev_line:
+                    res.append(["Branch", line_text])
+                if "PIN" in prev_line:
+                    res.append(["Pin", line_text])
+                if "Year" in prev_line:
+                    res.append(["Year", line_text])
+                if "Total Amount" in prev_line:
+                    res.append(["Amount",line_text])
+                prev_line = line_text
+    return res
 
 def extract_bills(file):
     try:
@@ -215,9 +213,9 @@ def extract_bills(file):
             # Decode the image using OpenCV
             image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
             image=denoise_image(image)
-            table_data=extract_table(image)
+            # table_data=extract_table(image)
             details=extract_bill_details(image)
-            details.extend(table_data)
+            # details.extend(table_data)
             data_dict = {col[0]: col[1:] for col in details}
             json_data = [data_dict]
             #json_output = json.dumps(json_data, indent=4)
@@ -235,9 +233,9 @@ def extract_bills(file):
                 img = np.array(img)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 img=denoise_image(img)
-                extracted=extract_table(img)
-                details=extract_details(img)
-                details.extend(extracted)
+                # extracted=extract_table(img)
+                details=extract_bill_details(img)
+                # details.extend(extracted)
                 data_dict = {col[0]: col[1:] for col in details}
                 processed_files.append(data_dict)
             os.remove(temp_path)
