@@ -11,6 +11,8 @@ import cv2
 import locale
 from django.conf import settings
 from pdf2image import convert_from_path
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 # Create your views here.
@@ -59,7 +61,6 @@ def extract_details(img):
 def extract_from_columns(img):
     # results=column_detect([np.array(img)])
     results=column_detect(img)
-    print("Column Detect Executed....!")
     print("No of columns detected:",len(results[0].boxes))
     columns=[]
     for result in results:
@@ -98,6 +99,55 @@ def extract_table(img):
                 return res
     return []
 
+def handle_grade_key(d):
+    if "Grade" in d:  # Check if the key exists
+        grade_list = d["Grade"]
+        valid_grades=['A','A+','O','B','B+','F']
+        for i in range(len(grade_list)):
+            # If current value is None or not in valid grades list
+            if grade_list[i] is None or grade_list[i] not in valid_grades:
+                # Look for the next valid value
+                next_val = None
+                for j in range(i + 1, len(grade_list)):
+                    if grade_list[j] in valid_grades:  # Check if it's a valid grade
+                        next_val = grade_list[j]
+                        break
+                
+                # If next valid value exists, use it
+                if next_val is not None:
+                    grade_list[i] = next_val
+                # Otherwise, use the last known valid value
+                elif i > 0 and grade_list[i - 1] in valid_grades:
+                    grade_list[i] = grade_list[i - 1]
+        d['Grade']=grade_list
+    return d
+
+def combine_extract(image):
+    try:
+        image=denoise_image(image)
+        table_data=extract_table(image)
+        details=extract_details(image)
+        #details.extend(table_data)
+        data = {col[0]: col[1:] for col in table_data}
+        c=0
+        for key in data:
+            k=key.lower()
+            if k=="si.no" or k=="slno" or k=="sino" or k=="sl.no":
+                for j in data[key]:
+                    if j.isdigit():
+                        c+=1
+                break
+        print(data)
+        for key in data:
+            data[key] = data[key][:c] + [None] * (c - len(data[key])) if len(data[key]) < c else data[key][:c]
+        print("Table data completed",data)
+        data=handle_grade_key(data)
+        for col in details:
+            data[col[0]]=col[1:]
+        return data
+    except Exception as e:
+        print("An exception occured in combine_extract_bills method: ",e)
+
 def extract(file):
     try:
         if file.content_type.startswith('image/'):
@@ -110,13 +160,7 @@ def extract(file):
         
             # Decode the image using OpenCV
             image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-            image=denoise_image(image)
-            table_data=extract_table(image)
-            print("Table Detection Completed...!")
-            details=extract_details(image)
-            print("Details Extraction Completed...!")
-            details.extend(table_data)
-            data_dict = {col[0]: col[1:] for col in details}
+            data_dict=combine_extract(image)
             json_data = [data_dict]
             #json_output = json.dumps(json_data, indent=4)
             print("Json conversion completed")
@@ -134,11 +178,7 @@ def extract(file):
             for img in images:
                 img = np.array(img)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                img=denoise_image(img)
-                extracted=extract_table(img)
-                details=extract_details(img)
-                details.extend(extracted)
-                data_dict = {col[0]: col[1:] for col in details}
+                data_dict=combine_extract(img)
                 processed_files.append(data_dict)
             os.remove(temp_path)
             #json_output = json.dumps(processed_files, indent=4)
@@ -156,6 +196,7 @@ def extract(file):
         print(f"An error occurred while processing the file {file.name}: {e}")
         return None
 
+@csrf_exempt
 def upload_files(request):
     try:
         if request.method == 'POST':
@@ -170,56 +211,142 @@ def upload_files(request):
                 processed_files.extend( extracted)
                 print("Processing completed...")
             #print("Processed Files:",processed_files)
-            return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+            #return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+            return JsonResponse({
+                "status": True,
+                "data": processed_files
+            })
             
-        return render(request, 'testing.html')
+        else:
+            return JsonResponse({
+            "status": False,
+            "msg": "Only POST method allowed"
+            }, status=400)
     except Exception as e:
         print("Error Ocuured",e)
-        return None
+        return JsonResponse({
+                "status": False,
+                "data": []
+                "msg":f"Error occured: {str(e)}"
+            })
+
+# def extract_bill_details(img):
+#     result1 = docTr_model([np.array(img)])
+#     print("Bill details extraction called....!")
+#     res=[]
+#     prev_line=""
+#     for page in result1.pages:
+#         for block in page.blocks:
+#             for line in block.lines:
+#                 line_text = " ".join([word.value for word in line.words])
+#                 print(line_text)
+#                 if "Receipt No" in prev_line:
+#                     res.append(["Receipt No", line_text])
+#                 if "Date" in prev_line:
+#                     res.append(["Date", line_text])
+#                 if "Name" in prev_line:
+#                     res.append(["Name", line_text])
+#                 if "Branch" in prev_line:
+#                     res.append(["Branch", line_text])
+#                 if "PIN" in prev_line:
+#                     res.append(["Pin", line_text])
+#                 if "Year" in prev_line:
+#                     res.append(["Year", line_text])
+#                 if "Total" in prev_line:
+#                     res.append(["Amount",line_text])
+#                 prev_line = line_text
+#     return res
 
 def extract_bill_details(img):
     result1 = docTr_model([np.array(img)])
-    print("Bill details extraction called....!")
-    res=[]
-    prev_line=""
+    l = [] 
+    last_key = None  # Store the last key if value is on the next line
+    
     for page in result1.pages:
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
                 print(line_text)
-                if "Receipt No" in prev_line:
-                    res.append(["Receipt No", line_text])
-                if "Date" in prev_line:
-                    res.append(["Date", line_text])
-                if "Name" in prev_line:
-                    res.append(["Name", line_text])
-                if "Branch" in prev_line:
-                    res.append(["Branch", line_text])
-                if "PIN" in prev_line:
-                    res.append(["Pin", line_text])
-                if "Year" in prev_line:
-                    res.append(["Year", line_text])
-                if "Total Amount" in prev_line:
-                    res.append(["Amount",line_text])
-                prev_line = line_text
-    return res
+                
+                # Check for keys and values in the same line
+                name = re.search(r'Name\s*:\s*(.*)', line_text)
+                if name:
+                    l.append(["Name", name.group(1)])
+                    last_key = None  # Reset last_key if value is found on the same line
+                    continue
+                
+                receipt = re.search(r'Receipt\s*No\s*:\s*(.*)', line_text)
+                if receipt:
+                    l.append(["Receipt No", receipt.group(1)])
+                    last_key = None
+                    continue
+                
+                date = re.search(r'Date\s*:\s*(.*)', line_text)
+                if date:
+                    l.append(["Date", date.group(1)])
+                    last_key = None
+                    continue
+                
+                branch = re.search(r'Branch\s*:\s*(.*)', line_text)
+                if branch:
+                    l.append(["Branch", branch.group(1)])
+                    last_key = None
+                    continue
+                
+                pin = re.search(r'PIN\s*:\s*(.*)', line_text)
+                if pin:
+                    l.append(["Pin", pin.group(1)])
+                    last_key = None
+                    continue
+                
+                year = re.search(r'Year\s*:\s*(.*)', line_text)
+                if year:
+                    l.append(["Year", year.group(1)])
+                    last_key = None
+                    continue
+                
+                # If no value on the same line, check if it's just the key
+                if re.search(r'Name\s*:', line_text):
+                    last_key = "Name"
+                elif re.search(r'Receipt\s*No\s*:', line_text):
+                    last_key = "Receipt No"
+                elif re.search(r'Date\s*:', line_text):
+                    last_key = "Date"
+                elif re.search(r'Branch\s*:', line_text):
+                    last_key = "Branch"
+                elif re.search(r'PIN\s*:', line_text):
+                    last_key = "Pin"
+                elif re.search(r'Year\s*:', line_text):
+                    last_key = "Year"
+                else:
+                    # If last_key is set, treat this line as the value
+                    if last_key:
+                        l.append([last_key, line_text])
+                        last_key = None  # Reset last_key after using it
+    return l
+
+
+def combine_extract_bills(image):
+    try:
+        image=denoise_image(image)
+        details=extract_bill_details(image)
+        data = {col[0]: col[1:] for col in details}
+        max_length = max(len(v) for v in data.values())
+        for key in data:
+            data[key] += [None] * (max_length - len(data[key]))
+        return data
+    except Exception as e:
+        print("An exception occured in combine_extract_bills method: ",e)
+
 
 def extract_bills(file):
     try:
         if file.content_type.startswith('image/'):
             image_stream = file.read()
             image_data = np.frombuffer(image_stream, np.uint8)
-        
-            # Decode the image using OpenCV
             image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-            image=denoise_image(image)
-            # table_data=extract_table(image)
-            details=extract_bill_details(image)
-            # details.extend(table_data)
-            data_dict = {col[0]: col[1:] for col in details}
-            json_data = [data_dict]
-            #json_output = json.dumps(json_data, indent=4)
-            #print("Json conversion completed")
+            data=combine_extract_bills(image)
+            json_data = [data]
             return json_data
                                         
         elif file.content_type == 'application/pdf':
@@ -232,12 +359,8 @@ def extract_bills(file):
             for img in images:
                 img = np.array(img)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                img=denoise_image(img)
-                # extracted=extract_table(img)
-                details=extract_bill_details(img)
-                # details.extend(extracted)
-                data_dict = {col[0]: col[1:] for col in details}
-                processed_files.append(data_dict)
+                data=combine_extract_bills(img)
+                processed_files.append(data)
             os.remove(temp_path)
             #json_output = json.dumps(processed_files, indent=4)
             #return json_output
