@@ -33,13 +33,12 @@ def denoise_image(image):
 
 def extract_details(img):
     result1 = docTr_model([np.array(img)])
-    #print("Details extraction called....!")
     l=[]
     for page in result1.pages:
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
-                print(line_text)
+                #print(line_text)
                 student_name = re.search(r'Student\s*(.*)', line_text)
                 if student_name:
                     l.append(["Name",student_name.group(1)])
@@ -90,7 +89,7 @@ def extract_table(img):
             print("Inside the boxes...:::")
             # Extract confidence score and bounding box coordinates
             confidence = box.conf.item()  #confidence score
-            print("COnfidence Score",confidence)
+            print("Confidence Score",confidence)
             if confidence > 0.70:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # Bounding box coordinates
                 # Crop the image to the bounding box size
@@ -100,9 +99,9 @@ def extract_table(img):
     return []
 
 def handle_grade_key(d):
-    if "Grade" in d:  # Check if the key exists
+    if "Grade" in d:
         grade_list = d["Grade"]
-        valid_grades=['A','A+','O','B','B+','F']
+        valid_grades=['A','A+','O','B','B+','F','o']
         for i in range(len(grade_list)):
             # If current value is None or not in valid grades list
             if grade_list[i] is None or grade_list[i] not in valid_grades:
@@ -113,10 +112,8 @@ def handle_grade_key(d):
                         next_val = grade_list[j]
                         break
                 
-                # If next valid value exists, use it
                 if next_val is not None:
                     grade_list[i] = next_val
-                # Otherwise, use the last known valid value
                 elif i > 0 and grade_list[i - 1] in valid_grades:
                     grade_list[i] = grade_list[i - 1]
         d['Grade']=grade_list
@@ -131,8 +128,10 @@ def combine_extract(image):
         data = {col[0]: col[1:] for col in table_data}
         c=0
         for key in data:
-            k=key.lower()
-            if k=="si.no" or k=="slno" or k=="sino" or k=="sl.no":
+            #k=key.lower()
+            pattern = r'\b(s[il])[\s\.]*no[\.\s]*\b'
+            # if k=="si.no" or k=="slno" or k=="sino" or k=="sl.no" :
+            if re.match(pattern, key, re.IGNORECASE):
                 for j in data[key]:
                     if j.isdigit():
                         c+=1
@@ -266,8 +265,7 @@ def extract_bill_details(img):
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
-                print(line_text)
-                
+                #print(line_text)
                 # Check for keys and values in the same line
                 name = re.search(r'Name\s*:\s*(.*)', line_text)
                 if name:
@@ -377,6 +375,7 @@ def extract_bills(file):
         print(f"An error occurred while processing the file {file.name}: {e}")
         return None
 
+@csrf_exempt
 def upload_Bills(request):
     try:
         if request.method == 'POST':
@@ -384,14 +383,26 @@ def upload_Bills(request):
             processed_files = []
             data=[]
             for uploaded_file in uploaded_files:
-                
                 extracted=extract_bills(uploaded_file)
                 processed_files.extend( extracted)
                 print("Processing completed...")
             #print("Processed Files:",processed_files)
-            return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+            # return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+            return JsonResponse({
+                "status": True,
+                "data": processed_files
+            })
             
-        return render(request, 'testing.html')
+        else:
+            return JsonResponse({
+                "status": False,
+                "msg": "Only POST method allowed"
+            }, status=400)
+        #return render(request, 'testing.html')
     except Exception as e:
         print("Error Ocuured",e)
-        return None
+        return JsonResponse({
+                "status": False,
+                "data": [],
+                "msg":f"Error occured: {str(e)}"
+            })
