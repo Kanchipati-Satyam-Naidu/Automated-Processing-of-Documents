@@ -226,7 +226,7 @@ def upload_files(request):
         print("Error Ocuured",e)
         return JsonResponse({
                 "status": False,
-                "data": []
+                "data": [],
                 "msg":f"Error occured: {str(e)}"
             })
 
