@@ -132,9 +132,15 @@ def combine_extract(image):
             pattern = r'\b(s[il])[\s\.]*no[\.\s]*\b'
             # if k=="si.no" or k=="slno" or k=="sino" or k=="sl.no" :
             if re.match(pattern, key, re.IGNORECASE):
+                m=0
                 for j in data[key]:
                     if j.isdigit():
-                        c+=1
+                        j=int(j)
+                        if j>m:
+                            m=j
+                        # c+=1
+                data[key]=[i for i in range(1,m+1)]
+                c=m
                 break
         print(data)
         for key in data:
@@ -178,7 +184,8 @@ def extract(file):
                 img = np.array(img)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 data_dict=combine_extract(img)
-                processed_files.append(data_dict)
+                if data_dict:
+                    processed_files.append(data_dict)
             os.remove(temp_path)
             #json_output = json.dumps(processed_files, indent=4)
             #return json_output
@@ -207,8 +214,9 @@ def upload_files(request):
                 # file = request.files['image']
                 extracted=extract(uploaded_file)
                 #print(extracted)
-                processed_files.extend( extracted)
-                print("Processing completed...")
+                if extracted:
+                    processed_files.extend( extracted)
+            print("Processing completed...")
             #print("Processed Files:",processed_files)
             #return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
             return JsonResponse({
@@ -228,6 +236,7 @@ def upload_files(request):
                 "data": [],
                 "msg":f"Error occured: {str(e)}"
             })
+
 
 # def extract_bill_details(img):
 #     result1 = docTr_model([np.array(img)])
@@ -258,68 +267,77 @@ def upload_files(request):
 
 def extract_bill_details(img):
     result1 = docTr_model([np.array(img)])
-    l = [] 
+    l = {}
     last_key = None  # Store the last key if value is on the next line
     
     for page in result1.pages:
         for block in page.blocks:
             for line in block.lines:
                 line_text = " ".join([word.value for word in line.words])
-                #print(line_text)
+                # print(line_text)
                 # Check for keys and values in the same line
-                name = re.search(r'Name\s*:\s*(.*)', line_text)
+                name = re.search(r'Name\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if name:
-                    l.append(["Name", name.group(1)])
+                    l["Name"]= [name.group(1)]
                     last_key = None  # Reset last_key if value is found on the same line
                     continue
-                
-                receipt = re.search(r'Receipt\s*No\s*:\s*(.*)', line_text)
+                std = re.search(r'Student\s*:\s*(.+\S)', line_text, re.IGNORECASE)
+                if std:
+                  l['Name']=[std.group(1)]
+                  last_key = None
+                  continue
+
+                receipt = re.search(r'Rec(?:eipt)?\s+No\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if receipt:
-                    l.append(["Receipt No", receipt.group(1)])
+                    l["Receipt No"]= [receipt.group(1)]
                     last_key = None
                     continue
                 
-                date = re.search(r'Date\s*:\s*(.*)', line_text)
+                date = re.search(r'Date\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if date:
-                    l.append(["Date", date.group(1)])
+                    l["Date"]=[date.group(1)]
                     last_key = None
                     continue
                 
-                branch = re.search(r'Branch\s*:\s*(.*)', line_text)
+                branch = re.search(r'Branch\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if branch:
-                    l.append(["Branch", branch.group(1)])
+                    l["Branch"]= [branch.group(1)]
                     last_key = None
                     continue
                 
-                pin = re.search(r'PIN\s*:\s*(.*)', line_text)
+                pin = re.search(r'PIN\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if pin:
-                    l.append(["Pin", pin.group(1)])
+                    l["Pin"]= [pin.group(1)]
                     last_key = None
                     continue
                 
-                year = re.search(r'Year\s*:\s*(.*)', line_text)
+                year = re.search(r'Year\s*:\s*(.+\S)', line_text, re.IGNORECASE)
                 if year:
-                    l.append(["Year", year.group(1)])
+                    l["Year"]=[year.group(1)]
                     last_key = None
                     continue
                 
                 # If no value on the same line, check if it's just the key
-                if re.search(r'Name\s*:', line_text):
+                if re.match(r'Name\s*:', line_text, re.IGNORECASE):
                     last_key = "Name"
-                elif re.search(r'Receipt\s*No\s*:', line_text):
+                elif re.match(r'Student\s*:', line_text, re.IGNORECASE):
+                    last_key = "Name"
+                elif re.search(r'Rec(?:eipt)?\s+No\s*:\s*', line_text, re.IGNORECASE):
                     last_key = "Receipt No"
-                elif re.search(r'Date\s*:', line_text):
+                elif re.search(r'Date\s*:', line_text, re.IGNORECASE):
                     last_key = "Date"
-                elif re.search(r'Branch\s*:', line_text):
+                elif re.search(r'Branch\s*:', line_text, re.IGNORECASE):
                     last_key = "Branch"
-                elif re.search(r'PIN\s*:', line_text):
+                elif re.search(r'PIN\s*:', line_text, re.IGNORECASE):
                     last_key = "Pin"
-                elif re.search(r'Year\s*:', line_text):
+                elif re.search(r'Year\s*:', line_text, re.IGNORECASE):
                     last_key = "Year"
+                elif "Total" in line_text:
+                    last_key="Amount"
                 else:
                     # If last_key is set, treat this line as the value
                     if last_key:
-                        l.append([last_key, line_text])
+                        l[last_key]= [line_text]
                         last_key = None  # Reset last_key after using it
     return l
 
@@ -327,11 +345,12 @@ def extract_bill_details(img):
 def combine_extract_bills(image):
     try:
         image=denoise_image(image)
-        details=extract_bill_details(image)
-        data = {col[0]: col[1:] for col in details}
-        max_length = max(len(v) for v in data.values())
-        for key in data:
-            data[key] += [None] * (max_length - len(data[key]))
+        data=extract_bill_details(image)
+        #data = {col[0]: col[1:] for col in details}
+        print("Data:",data)
+        # max_length = max(len(v) for v in data.values())
+        # for key in data:
+        #     data[key] += [None] * (max_length - len(data[key]))
         return data
     except Exception as e:
         print("An exception occured in combine_extract_bills method: ",e)
@@ -348,21 +367,28 @@ def extract_bills(file):
             return json_data
                                         
         elif file.content_type == 'application/pdf':
-            temp_path = os.path.join(settings.MEDIA_ROOT, file.name)
-            with open(temp_path, 'wb') as temp_file:
-                for chunk in file.chunks():
-                    temp_file.write(chunk)
-            processed_files=[]
-            images = convert_from_path(temp_path, dpi=300)
-            for img in images:
-                img = np.array(img)
-                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                data=combine_extract_bills(img)
-                processed_files.append(data)
-            os.remove(temp_path)
-            #json_output = json.dumps(processed_files, indent=4)
-            #return json_output
-            return processed_files
+            try:
+                temp_path = os.path.join(settings.MEDIA_ROOT, file.name)
+                with open(temp_path, 'wb') as temp_file:
+                    for chunk in file.chunks():
+                        temp_file.write(chunk)
+                processed_files=[]
+                images = convert_from_path(temp_path, dpi=300)
+                for img in images:
+                    img = np.array(img)
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    data=combine_extract_bills(img)
+                    if data:
+                        processed_files.append(data)
+
+            except Exception as e:
+                print('Exception Occured in pdfs bill handling:',e)
+                #json_output = json.dumps(processed_files, indent=4)
+                #return json_output
+            finally:
+                # print("Inside finally of bills:",processed_files)
+                os.remove(temp_path)
+                return processed_files
 
         elif file.content_type == 'text/plain':
             file_content = file.read().decode('utf-8')
@@ -375,6 +401,7 @@ def extract_bills(file):
         print(f"An error occurred while processing the file {file.name}: {e}")
         return None
 
+
 @csrf_exempt
 def upload_Bills(request):
     try:
@@ -384,8 +411,9 @@ def upload_Bills(request):
             data=[]
             for uploaded_file in uploaded_files:
                 extracted=extract_bills(uploaded_file)
-                processed_files.extend( extracted)
-                print("Processing completed...")
+                if extracted:
+                    processed_files.extend( extracted)
+            print("Processing completed...")
             #print("Processed Files:",processed_files)
             # return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
             return JsonResponse({
@@ -406,3 +434,14 @@ def upload_Bills(request):
                 "data": [],
                 "msg":f"Error occured: {str(e)}"
             })
+
+
+# def testing(request):
+#     if request.method=="POST":
+#         files=request.FILES.getlist('files')
+#         processed_files = []
+#         for file in files:
+#             extracted=extract_bills(file)
+#             processed_files.extend( extracted)
+#         return render(request,'upload_success.html',{"data":json.dumps(processed_files, indent=4)})
+#     return render(request, 'testing.html')
